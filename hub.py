@@ -1,5 +1,6 @@
 from flask import Flask, request, render_template, jsonify, redirect, url_for
 from flask_sqlalchemy import SQLAlchemy
+from flask_cors import CORS
 import json
 import datetime
 import requests
@@ -30,6 +31,7 @@ class ConfigClass(object):
 
 # Create Flask app
 app = Flask(__name__)
+CORS(app)       #enable CORS for all routes
 app.config.from_object(__name__ + '.ConfigClass')  # configuration
 app.app_context().push()  # create an app context before initializing db
 db.init_app(app)  # initialize database

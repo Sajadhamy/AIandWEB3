@@ -5,6 +5,8 @@ from flask import Flask, request, render_template, jsonify
 import json
 import requests
 from better_profanity import profanity #for filtering
+from flask_cors import CORS
+import datetime
 
 #load the defult list of th bad words
 profanity.load_censor_words()
@@ -12,30 +14,33 @@ profanity.load_censor_words()
 # Class-based application configuration
 class ConfigClass(object):
     """ Flask application config """
-
     # Flask settings
     SECRET_KEY = 'This is an INSECURE secret!! DO NOT use this in production!!' # change to something random, no matter what
 
 # Create Flask app
 app = Flask(__name__)
+CORS(app)       #enable CORS for all routes
 app.config.from_object(__name__ + '.ConfigClass')  # configuration
 app.app_context().push()  # create an app context before initializing db
 
+#Channel settings:
 HUB_URL = 'http://localhost:5555'
 HUB_AUTHKEY = '1234567890'
 CHANNEL_AUTHKEY = '0987654321'
-CHANNEL_NAME = "Sajjad's Channel"
+CHANNEL_NAME = "The one and only Football Channel"
 CHANNEL_ENDPOINT = "http://localhost:5001" # don't forget to adjust in the bottom of the file
 CHANNEL_FILE = 'messages.json'
 CHANNEL_TYPE_OF_SERVICE = 'aiweb24:chat'
 
 #simple welcome message to insert if the file is empty
 WELCOME_MESSAGE = {
-    'content' : "Welcome to all!",
+    'content' : "Welcome to the greatest place to talk about Football!",
     'sender' : "System",
     'timestamp' : "2025-02-16T00:00:00",
     'extra' : None
 }
+#off-toppic words to filter out
+OFF_TOPIC_KEYWORDS = ["cooking", "recipe", "politics", "movie", "economy"]
 
 @app.cli.command('register')
 def register_command():
@@ -99,8 +104,14 @@ def send_message():
     if 'timestamp' not in message:
         return "No timestamp", 400
     
-    #FILTER unwanted content or profanity
+
     original_content = message['content']
+
+    #off-topic filtering
+    if is_off_topic(original_content):
+        return "Off-topic: This channel only welcomes Football discussions. Message blocked.", 400
+    
+    #profanity filter
     cleaned_content = profanity.censor(original_content) # e.g. "****" for bad words
     # Save the sanitized content
     message['content'] = cleaned_content
@@ -112,30 +123,48 @@ def send_message():
         'timestamp' : message['timestamp'],
         'extra' : message.get('extra', None),
     })
-    #limit to the last 50 messages
-    messages = messages[-50:]
-
+    messages = messages[-50:]      # limit to 50 right away
     save_messages(messages)
 
-    if "hello" in original_content.lower():
-        auto_reply(messages, "Hello! Thanks for greeting Sajjad’s Channel.")
-
+    #handle multiple triggers
+    handle_triggers(original_content, messages)
     return "OK", 200
+def is_off_topic(text):
+    #returns True if the text contains any off-topic keywords
+    lower_text = text.lower()
+    for word in OFF_TOPIC_KEYWORDS:
+        if word in lower_text:
+            return True
+    return False
 
-def auto_reply(messages, reply_text):
-    """
-    A simple function that appends an automatic response to the message list.
-    """
-    import datetime
-    messages.append({
-        'content': reply_text,
-        'sender': "Sajjad’s Channel Bot",
-        'timestamp': datetime.datetime.now().isoformat(),
-        'extra': None
-    })
-    # Again limit to last 50
+def handle_triggers(user_input, messages):
+    triggers = {
+        "hello" : "Hello! Thanks for greeting my football Channel",
+        "help" : "List of commands: 'hello', 'help', 'bye', 'ping', 'soccer', 'goat', 'current world champions', 'current EURO champions'. Type one to see what happens!",
+        "bye" : "Goodbye! See ya next time.",
+        "ping" : "Pong! I'm alive. HAHA!",
+        "soccer" : "I think you mean Football!",
+        "goat" : "Lionel Messi",
+        "current world champions" : "Argentina",
+        "current EURO champions" : "Spain"
+    }
+    lowerc = user_input.lower()
+    added_reply = False
+
+    for keyword, reply_text in triggers.items():
+        if keyword in lowerc:
+            messages.append({
+                'content': reply_text,
+                'sender': "FootballBot",
+                'timestamp': datetime.datetime.now().isoformat(),
+                'extra': None
+            })
+            added_reply = True
+
+    #keep the last 50 messages
     messages = messages[-50:]
     save_messages(messages)
+
 
 def read_messages():
     global CHANNEL_FILE
