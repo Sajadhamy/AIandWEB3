@@ -108,7 +108,7 @@
         }
 
         /*main app component*/
-        function App(){
+        function App() {
             const [channels, setChannels] = React.useState([]);
             const [selectedChannel, setSelectedChannel] = React.useState(null);
             const [userName, setUserName] = React.useState(() => {
@@ -139,17 +139,9 @@
                               // For each channel, fetch the message list and see how many exist
                               channels.forEach(ch => {
                                 fetch(ch.endpoint, {
-                                    headers: {Authorization: "autokey" + ch.authkey }
+                                    headers: { Authorization: "authkey " + ch.authkey }
                                 })
-                                .then(res => {
-                                    if (res.ok) {
-                                        return res.json();   // parse JSON if HTTP 200
-                                    } else {
-                                        return res.text().then(errorText => {
-                                            throw new Error(errorText);
-                                            });
-                                    }
-                                })
+                                .then(res => res.json())
                                 .then(msgs => {
                                     //If haven't "selected" the channel or don't have last known read count, consider them all unread. Or store a "last read" count somewhere local. For simplicity, just store "current total" in unreadCounts
                                     setUnreadCounts(prev => ({
@@ -161,7 +153,7 @@
                               });
                 }, 10000); //every 10 sec
 
-                return ()=> clearInterval(interval);
+                return () => clearInterval(interval);
             }, [channels]);
             // once the user sets userName, store it in localStorage
             React.useEffect(() => {
@@ -219,10 +211,9 @@
                      )}
                 </div>
             );
-
         }
         /*prompt user for their name*/
-        function NameDialog({onSubmit}) {
+        function NameDialog({ onSubmit }) {
             const [tempName, setTempName] = React.useState("");
 
             function handleKeyDown(e) {
@@ -230,10 +221,12 @@
                     handleConfirm();
                 }
             }
+
             function handleConfirm() {
                 if (!tempName.trim()) return;
                 onSubmit(tempName.trim());
             }
+
             return (
                 <dialog open>
                     <article>
@@ -256,11 +249,13 @@
         }
 
         /*ChannelList: includes a search box and unread badges*/
-        function ChannelList({ channels, unreadCounts, onChannelSelect}) {
+        function ChannelList({ channels, unreadCounts, onChannelSelect }) {
             const [search, setSearch] = React.useState("");
+
             const filtered = channels.filter(c =>
                 c.name.toLowerCase().includes(search.toLowerCase())
             );
+
             return (
                 <div>
                     <h3>Channels</h3>
@@ -314,25 +309,21 @@
                     }
                 })
                     .then(res => {
-                        if (res.ok) {
-                            return res.json();
-                        } else {
-                            //paerse the error as text
-                            return res.text().then(errorText => {
-                                throw new Error(errorText);
-                            });
+                        if (!res.ok) {
+                            throw new Error("Invalid authorization or other error");
                         }
+                            return res.json();
                     })
                     .then(data => {
-                        //'data' is the array of messages if res.ok was true
-                        setMessages(data);
+                        if (Array.isArray(data)) {
+                            setMessages(data);
+                        }
                     })
                     .catch(err => {
-                        console.error("Failed to fetch messages:", err.message);
-                        alert("Error: " + err.message);
+                        console.error("Failed to fetch messages:", err);
+                        //won't do an alert here to avoid spam
                     });
             }
-
 
             function postMessage(e) {
                 e.preventDefault();
@@ -354,22 +345,15 @@
                     })
                 })
                     .then(res => {
-                        if (res.ok) {
-                            return res.json();
-                        } else {
-                            //paerse the error as text
-                            return res.text().then(errorText => {
-                                throw new Error(errorText);
-                            });
-                        }
-                    })
-                    .then(data => {
-                        //'data' is the array of messages if res.ok was true
-                        setMessages(data);
+                        if (!res.ok) {
+                            throw new Error("Posting message failed");
+                        } 
+                        setNewMessage("");
+                        fetchMessages();
                     })
                     .catch(err => {
-                        console.error("Failed to fetch messages:", err.message);
-                        alert("Error: " + err.message);
+                        console.error("Error posting message:", err);
+                        alert("Error posting message: " + err);
                     });
             }
 
@@ -414,7 +398,6 @@
                     </form>
              </div>
             );
-
         }
 
 
@@ -425,5 +408,3 @@
     </script>
 </body>
 </html>
-
-

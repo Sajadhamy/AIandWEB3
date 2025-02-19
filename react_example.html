@@ -1,88 +1,421 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>React: Sharing states between components</title>
-    <!-- Link to Pico CSS from a CDN -->
-    <link rel="stylesheet" href="https://unpkg.com/@picocss/pico@latest/css/pico.min.css">
-    <style>
-            /* Ensure full viewport height */
-            html, body {
-              height: 100%;
-              margin: 0;
-            }
-            /* Set up a flex container for the body */
-            body {
-              display: flex;
-              flex-direction: column;
-            }
-            /* Make main fill remaining space */
-            main {
-              flex: 1;
-            }
-    </style>
+  <meta charset="UTF-8">
+  <title>React Chat Client - Football Channel</title>
+  <!-- 1) Optional: A lightweight CSS framework, PicoCSS -->
+  <link rel="stylesheet" href="https://unpkg.com/@picocss/pico@latest/css/pico.min.css">
+  <style>
+    /* 2) Basic styling for side-by-side layout */
+    .container {
+      display: flex;
+      height: 90vh;
+      gap: 1rem;
+    }
+    .sidebar {
+      width: 300px;
+      border-right: 1px solid #ccc;
+      padding: 1rem;
+      overflow-y: auto;
+    }
+    .chat-panel {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      padding: 1rem;
+    }
+    .messages-area {
+      flex: 1;
+      overflow-y: auto;
+      margin-bottom: 1rem;
+    }
+    .my-message {
+      background: #d0f0d0;
+      border-radius: 5px;
+      padding: 0.5rem;
+      margin: 0.5rem 0;
+      text-align: right;
+    }
+    .bot-message {
+      background: #e0e0f0;
+      border-radius: 5px;
+      padding: 0.5rem;
+      margin: 0.5rem 0;
+      text-align: left;
+      font-style: italic;
+    }
+    .system-message {
+      background: #fce5cd;
+      border-radius: 5px;
+      padding: 0.5rem;
+      margin: 0.5rem 0;
+      text-align: center;
+      font-weight: bold;
+    }
+    .other-message {
+      background: #f0f0f0;
+      border-radius: 5px;
+      padding: 0.5rem;
+      margin: 0.5rem 0;
+      text-align: left;
+    }
+    .search-box {
+      margin-bottom: 1rem;
+    }
+    .unread-badge {
+      background: red;
+      color: white;
+      border-radius: 50%;
+      padding: 0.25rem 0.5rem;
+      margin-left: 0.5rem;
+      font-size: 0.8rem;
+    }
+  </style>
 </head>
 <body>
-    <div id="root"></div>
+  <div id="root"></div>
 
-    <script src="https://unpkg.com/react@17/umd/react.development.js"></script>
-    <script src="https://unpkg.com/react-dom@17/umd/react-dom.development.js"></script>
-    <script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
+  <!-- 3) React, ReactDOM, Babel -->
+  <script src="https://unpkg.com/react@17/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@17/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
 
-    <script type="text/babel">
+  <script type="text/babel">
 
-        function NameDialog({name, setName}) {
-            return <dialog open>
-                      <article>
-                        <header>
-                          <p>
-                            <strong>What's your name?</strong>
-                          </p>
-                        </header>
-                        <p>
-                          <input type="text"
-                                     onKeyDown={({key, target}) => key === 'Enter' && setName(target.value)}/>
-                        </p>
-                      </article>
-                    </dialog>
-        }
+    /***********************************************************************
+     * Utility: parse special [nop]_word_[/nop] for bold, [nop]*word*[/nop] for italics
+     ***********************************************************************/
+    function formatMessageContent(content, extra) {
+      // If extra.format === "loud", we uppercase
+      if (extra && extra.format === "loud") {
+        content = content.toUpperCase();
+      }
 
-        function Container() {
-            const [name, setName] = React.useState("");
+      // Replace [nop]_word_[/nop] with <b>word</b>
+      // Or [nop]*word*[/nop] with <i>word</i>
+      // We'll do a simple approach with regex.
+      // e.g. content = "Hello [nop]_football_[/nop]"
+      // becomes "Hello <b>football</b>"
 
-            if (name) {
-                return <div><h1>Hello, {name}!</h1>
-                    <button onClick={() => setName("")}>cancel</button>
-                </div>;
-            } else {
-                return (
-                    <NameDialog name={name} setName={setName}/>
-                );
+      // Bold version
+      const boldPattern = /\[nop\]_([^_]+)_\[\/nop\]/g; 
+      content = content.replace(boldPattern, (match, p1) => `<b>${p1}</b>`);
+
+      // Italic version
+      const italicPattern = /\[nop\]\*([^\*]+)\*\[\/nop\]/g; 
+      content = content.replace(italicPattern, (match, p1) => `<i>${p1}</i>`);
+
+      // Return as raw HTML (React dangerouslySetInnerHTML usage)
+      return {__html: content};
+    }
+
+    /***********************************************************************
+     * 1) The main app component
+     ***********************************************************************/
+    function App() {
+      const [channels, setChannels] = React.useState([]);
+      const [selectedChannel, setSelectedChannel] = React.useState(null);
+      const [userName, setUserName] = React.useState(() => {
+        // read from localStorage or default to "ReactUser"
+        return localStorage.getItem("userName") || "";
+      });
+      const [showNameDialog, setShowNameDialog] = React.useState(!userName);
+
+      // We'll track unread counts in a dictionary: {endpoint: unreadCount}
+      const [unreadCounts, setUnreadCounts] = React.useState({});
+
+      // On mount, fetch channels from the hub
+      React.useEffect(() => {
+        // Change this if your hub is at a different address
+        fetch("http://localhost:5555/channels")
+          .then(response => response.json())
+          .then(data => {
+            if (data.channels) {
+              setChannels(data.channels);
             }
-        }
+          })
+          .catch(err => console.error("Error fetching channels:", err));
+      }, []);
 
-        // main code: render the ChannelList component, add more components here
-        ReactDOM.render(
-            <div>
-                <header class="fixed-above-lg">
-                    <h1>React Component Example</h1>
-                </header>
-                <main class="container">
-                    <aside>The list of channels</aside>
-                    <hgroup>
-                        <h1>Chat client: List of channels</h1>
-                        <p>Here we go...</p>
-                    </hgroup>
-                    <div id="content">
-                        <section>
-                            <Container/>
-                        </section>
-                    </div>
-                </main>
-                <footer>AI and the Web 2025</footer>
-            </div>,
-            document.getElementById('root'));
-    </script>
+      // We'll periodically check each channel's message count to update the "unread" badge
+      // In a real app, you might do SSE or WebSockets. This is a naive approach.
+      React.useEffect(() => {
+        const interval = setInterval(() => {
+          // For each channel, fetch the message list and see how many exist
+          channels.forEach(ch => {
+            fetch(ch.endpoint, {
+              headers: { Authorization: "authkey " + ch.authkey }
+            })
+            .then(res => res.json())
+            .then(msgs => {
+              // If we haven't "selected" the channel or we don't have last known read count
+              // we consider them all unread. Or we store a "last read" count somewhere local.
+              // For simplicity, let's just store "current total" in unreadCounts
+              setUnreadCounts(prev => ({
+                ...prev,
+                [ch.endpoint]: msgs.length
+              }));
+            })
+            .catch(err => console.warn("Unread check error for channel", ch.name, err));
+          });
+        }, 10000); // every 10 seconds
+
+        return () => clearInterval(interval);
+      }, [channels]);
+
+      // Once the user sets userName, store it in localStorage
+      React.useEffect(() => {
+        if (userName) {
+          localStorage.setItem("userName", userName);
+        }
+      }, [userName]);
+
+      // channel selection logic
+      function handleChannelSelect(ch) {
+        setSelectedChannel(ch);
+        // Optionally set unreadCounts[ch.endpoint] = 0 if you want to "clear" unread
+        setUnreadCounts(prev => ({
+          ...prev,
+          [ch.endpoint]: 0
+        }));
+      }
+
+      function handleNameSubmit(newName) {
+        setUserName(newName);
+        setShowNameDialog(false);
+      }
+
+      return (
+        <div>
+          <header style={{padding: "1rem"}}>
+            <h1>React Chat Client</h1>
+          </header>
+
+          {showNameDialog && (
+            <NameDialog onSubmit={handleNameSubmit} />
+          )}
+
+          {!showNameDialog && (
+            <div className="container">
+              <div className="sidebar">
+                <ChannelList
+                  channels={channels}
+                  unreadCounts={unreadCounts}
+                  onChannelSelect={handleChannelSelect}
+                />
+              </div>
+              <div className="chat-panel">
+                {selectedChannel ? (
+                  <ChannelMessages
+                    channel={selectedChannel}
+                    userName={userName}
+                    onBack={() => setSelectedChannel(null)}
+                  />
+                ) : (
+                  <p>Select a channel to start chatting!</p>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    /***********************************************************************
+     * 2) Prompt user for their name (only once)
+     ***********************************************************************/
+    function NameDialog({ onSubmit }) {
+      const [tempName, setTempName] = React.useState("");
+
+      function handleKeyDown(e) {
+        if (e.key === "Enter") {
+          handleConfirm();
+        }
+      }
+
+      function handleConfirm() {
+        if (!tempName.trim()) return;
+        onSubmit(tempName.trim());
+      }
+
+      return (
+        <dialog open>
+          <article>
+            <header>
+              <h4>Welcome! What's your name?</h4>
+            </header>
+            <input
+              type="text"
+              placeholder="Enter your nickname"
+              value={tempName}
+              onChange={e => setTempName(e.target.value)}
+              onKeyDown={handleKeyDown}
+            />
+            <footer style={{ marginTop: "1rem" }}>
+              <button onClick={handleConfirm} aria-label="confirm">OK</button>
+            </footer>
+          </article>
+        </dialog>
+      );
+    }
+
+    /***********************************************************************
+     * 3) ChannelList: includes a search box, unread badges
+     ***********************************************************************/
+    function ChannelList({ channels, unreadCounts, onChannelSelect }) {
+      const [search, setSearch] = React.useState("");
+
+      const filtered = channels.filter(c =>
+        c.name.toLowerCase().includes(search.toLowerCase())
+      );
+
+      return (
+        <div>
+          <h3>Channels</h3>
+          <div className="search-box">
+            <input
+              type="search"
+              placeholder="Search channels..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+            />
+          </div>
+          <ul style={{ paddingLeft: 0 }}>
+            {filtered.map(ch => {
+              const unreadCount = unreadCounts[ch.endpoint] || 0;
+              return (
+                <li key={ch.endpoint} style={{ margin: "0.5rem 0", listStyle: "none" }}>
+                  <button onClick={() => onChannelSelect(ch)}>
+                    {ch.name}
+                  </button>
+                  {unreadCount > 0 && (
+                    <span className="unread-badge">{unreadCount}</span>
+                  )}
+                  <br />
+                  <small>Type: {ch.type_of_service}</small><br />
+                  <small>Endpoint: {ch.endpoint}</small>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      );
+    }
+
+    /***********************************************************************
+     * 4) ChannelMessages: show message list, handle postMessage, parse formatting
+     ***********************************************************************/
+    function ChannelMessages({ channel, userName, onBack }) {
+      const [messages, setMessages] = React.useState([]);
+      const [newMessage, setNewMessage] = React.useState("");
+
+      React.useEffect(() => {
+        fetchMessages();
+        // Also set up auto-refresh every 5s (optional)
+        const interval = setInterval(fetchMessages, 5000);
+        return () => clearInterval(interval);
+      }, [channel]);
+
+      function fetchMessages() {
+        fetch(channel.endpoint, {
+          headers: {
+            Authorization: "authkey " + channel.authkey
+          }
+        })
+          .then(res => {
+            if (!res.ok) {
+              throw new Error("Invalid authorization or other error");
+            }
+            return res.json();
+          })
+          .then(data => {
+            if (Array.isArray(data)) {
+              setMessages(data);
+            }
+          })
+          .catch(err => {
+            console.error("Failed to fetch messages:", err);
+            // We won't do an alert here, to avoid spam. 
+          });
+      }
+
+      function postMessage(e) {
+        e.preventDefault();
+        if (!newMessage.trim()) return;
+        const timestamp = new Date().toISOString();
+
+        fetch(channel.endpoint, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: "authkey " + channel.authkey
+          },
+          body: JSON.stringify({
+            content: newMessage,
+            sender: userName,
+            timestamp: timestamp,
+            extra: { format: "normal" }
+            // You could allow user to pick "loud" or "normal" as a format
+          })
+        })
+          .then(res => {
+            if (!res.ok) {
+              throw new Error("Posting message failed");
+            }
+            setNewMessage("");
+            fetchMessages();
+          })
+          .catch(err => {
+            console.error("Error posting message:", err);
+            alert("Error posting message: " + err);
+          });
+      }
+
+      return (
+        <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+          <div style={{ marginBottom: "0.5rem" }}>
+            <h2>{channel.name}</h2>
+            <button onClick={onBack}>Back to Channels</button>
+          </div>
+          <div className="messages-area">
+            {messages.map((m, i) => {
+              let className = "other-message";
+              if (m.sender === userName) className = "my-message";
+              if (m.sender === "FootballBot") className = "bot-message";
+              if (m.sender === "System") className = "system-message";
+
+              // parse content for [nop] bold/italics
+              const htmlContent = formatMessageContent(m.content, m.extra);
+
+              return (
+                <div key={i} className={className}>
+                  <strong>{m.sender}</strong>:{" "}
+                  <span dangerouslySetInnerHTML={htmlContent} />
+                  <br />
+                  <small>{m.timestamp}</small>
+                </div>
+              );
+            })}
+          </div>
+          <form onSubmit={postMessage} style={{ display: "flex", gap: "0.5rem" }}>
+            <input
+              style={{ flex: 1 }}
+              type="text"
+              placeholder="Type your message..."
+              value={newMessage}
+              onChange={e => setNewMessage(e.target.value)}
+            />
+            <button type="submit">Send</button>
+          </form>
+        </div>
+      );
+    }
+
+    /***********************************************************************
+     * Finally, render <App /> to the root
+     ***********************************************************************/
+    ReactDOM.render(<App />, document.getElementById('root'));
+
+  </script>
 </body>
 </html>
